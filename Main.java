@@ -27,7 +27,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 public class Main {
     public static void main(String[] args) throws IOException, JadxException {
         // Paths
-        String xapkPath = "/Users/macbook/IdeaProjects/Soot/src/0ac73aa8c95fe19eae64e0e130ca1d9a.apk";
+        String xapkPath = "/Users/macbook/IdeaProjects/Soot/src/chrome.xapk";
         String androidJars = "/Users/macbook/Library/Android/sdk/platforms/";
         String androidJarVersion = "android-33";
 
@@ -194,7 +194,7 @@ public class Main {
                 writer.write("  \"" + src.getSignature() + "\" -> \"" + tgt.getSignature() + "\";\n");
             }
             writer.write("}\n");
-            System.out.println("Call graph saved as call_graph.dot.");
+            System.out.println("Call graph saved as call_graph_chrome.dot.");
         } catch (IOException e) {
             e.printStackTrace();
         }

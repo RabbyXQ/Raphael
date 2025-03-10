@@ -12,17 +12,71 @@ public class ManifestChecker {
             "android.permission.READ_SMS",
             "android.permission.RECEIVE_SMS",
             "android.permission.ACCESS_FINE_LOCATION",
-            "android.permission.CAMERA"
+            "android.permission.ACCESS_COARSE_LOCATION",
+            "android.permission.CAMERA",
+            "android.permission.RECORD_AUDIO",
+            "android.permission.READ_CONTACTS",
+            "android.permission.WRITE_CONTACTS",
+            "android.permission.READ_CALL_LOG",
+            "android.permission.WRITE_CALL_LOG",
+            "android.permission.PROCESS_OUTGOING_CALLS",
+            "android.permission.READ_PHONE_STATE",
+            "android.permission.WRITE_EXTERNAL_STORAGE",
+            "android.permission.READ_EXTERNAL_STORAGE",
+            "android.permission.RECORD_AUDIO",
+            "android.permission.ACCESS_BACKGROUND_LOCATION",
+            "android.permission.BLUETOOTH_ADMIN",
+            "android.permission.BLUETOOTH",
+            "android.permission.BLUETOOTH_CONNECT",
+            "android.permission.BLUETOOTH_SCAN",
+            "android.permission.BLUETOOTH_ADVERTISE",
+            "android.permission.ACCESS_NETWORK_STATE",
+            "android.permission.CHANGE_NETWORK_STATE",
+            "android.permission.ACCESS_WIFI_STATE",
+            "android.permission.CHANGE_WIFI_STATE",
+            "android.permission.READ_HISTORY_BOOKMARKS",
+            "android.permission.WRITE_HISTORY_BOOKMARKS",
+            "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+            "android.permission.FOREGROUND_SERVICE",
+            "android.permission.GET_ACCOUNTS",
+            "android.permission.USE_CREDENTIALS",
+            "android.permission.MANAGE_ACCOUNTS",
+            "android.permission.AUTHENTICATE_ACCOUNTS",
+            "android.permission.BIND_ACCESSIBILITY_SERVICE",
+            "android.permission.SYSTEM_ALERT_WINDOW",
+            "android.permission.PACKAGE_USAGE_STATS",
+            "android.permission.KILL_BACKGROUND_PROCESSES",
+            "android.permission.WAKE_LOCK",
+            "android.permission.RECEIVE_BOOT_COMPLETED",
+            "android.permission.REQUEST_INSTALL_PACKAGES",
+            "android.permission.READ_PRIVILEGED_PHONE_STATE",
+            "android.permission.QUERY_ALL_PACKAGES",
+            "android.permission.BIND_VPN_SERVICE",
+            "android.permission.READ_PHONE_NUMBERS",
+            "android.permission.READ_MEDIA_AUDIO",
+            "android.permission.READ_MEDIA_VIDEO",
+            "android.permission.READ_MEDIA_IMAGES",
+            "android.permission.MEDIA_CONTENT_CONTROL",
+            "android.permission.NFC",
+            "android.permission.NFC_TRANSACTION_EVENT",
+            "android.permission.READ_CALENDAR",
+            "android.permission.WRITE_CALENDAR",
+            "android.permission.READ_FRAME_BUFFER",
+            "android.permission.CAPTURE_AUDIO_OUTPUT",
+            "android.permission.CAPTURE_VIDEO_OUTPUT",
+            "android.permission.CAPTURE_SECURE_VIDEO_OUTPUT",
+            "android.permission.BROADCAST_SMS",
+            "android.permission.BROADCAST_WAP_PUSH",
+            "android.permission.BROADCAST_STICKY",
+            "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
+            "android.permission.READ_LOGS",
+            "android.permission.SET_WALLPAPER",
+            "android.permission.SET_WALLPAPER_HINTS",
+            "android.permission.USE_FINGERPRINT",
+            "android.permission.USE_BIOMETRIC"
     };
 
-    /**
-     * Checks the AndroidManifest.xml for suspicious activities such as dangerous permissions
-     * or exported components (activities, services, or receivers).
-     *
-     * @param manifestPath The path to the AndroidManifest.xml file.
-     * @return A message indicating the result of the analysis.
-     * @throws Exception If there is an error while parsing or reading the manifest.
-     */
+
     public static String checkManifestForMaliciousActivity(String manifestPath) throws Exception {
         File manifestFile = new File(manifestPath);
         if (!manifestFile.exists()) {
