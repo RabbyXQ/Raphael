@@ -5,7 +5,7 @@ import java.util.*;
 
 public class XMLChecker {
 
-    private static final String CSV_FILE_PATH = "output.csv"; // Path to save the CSV file
+    private static  String CSV_FILE_PATH = "output.csv"; // Path to save the CSV file
     private static CSVWriter csvWriter;
 
     /**
@@ -123,27 +123,4 @@ public class XMLChecker {
     }
 }
 
-class CSVWriter {
 
-    private final FileWriter fileWriter;
-    private final BufferedWriter bufferedWriter;
-
-    public CSVWriter(FileWriter fileWriter) throws IOException {
-        this.fileWriter = fileWriter;
-        this.bufferedWriter = new BufferedWriter(fileWriter);
-    }
-
-    public void writeNext(String[] data) {
-        try {
-            bufferedWriter.write(String.join(",", data));
-            bufferedWriter.newLine();
-        } catch (IOException e) {
-            System.out.println("Error writing to CSV: " + e.getMessage());
-        }
-    }
-
-    public void close() throws IOException {
-        bufferedWriter.close();
-        fileWriter.close();
-    }
-}

@@ -1,9 +1,20 @@
 import org.w3c.dom.*;
 import javax.xml.parsers.*;
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 import soot.*;
 
 public class ManifestChecker {
+
+    private static String CSV_FILE = "menifest_results.csv";
+
+
 
     // Define some suspicious permissions for demonstration
     private static final String[] SUSPICIOUS_PERMISSIONS = {
@@ -77,73 +88,6 @@ public class ManifestChecker {
     };
 
 
-    public static String checkManifestForMaliciousActivity(String manifestPath) throws Exception {
-        File manifestFile = new File(manifestPath);
-        if (!manifestFile.exists()) {
-            return "Manifest file not found!";
-        }
-
-        // Initialize XML parser to read the AndroidManifest.xml file
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        Document document = builder.parse(manifestFile);
-
-        // Check for suspicious permissions
-        NodeList permissionNodes = document.getElementsByTagName("uses-permission");
-        for (int i = 0; i < permissionNodes.getLength(); i++) {
-            Element permissionElement = (Element) permissionNodes.item(i);
-            String permissionName = permissionElement.getAttribute("android:name");
-
-            // Check if the permission is suspicious
-            for (String suspiciousPermission : SUSPICIOUS_PERMISSIONS) {
-                if (permissionName.equals(suspiciousPermission)) {
-                    return "Warning: Suspicious permission found - " + permissionName;
-                }
-            }
-        }
-
-        // Check for suspicious exported activities
-        NodeList activityNodes = document.getElementsByTagName("activity");
-        for (int i = 0; i < activityNodes.getLength(); i++) {
-            Element activityElement = (Element) activityNodes.item(i);
-            String activityName = activityElement.getAttribute("android:name");
-            String exported = activityElement.getAttribute("android:exported");
-
-            // Check if exported activities are suspicious
-            if ("true".equals(exported)) {
-                return "Warning: Exported activity found - " + activityName;
-            }
-        }
-
-        // Check for suspicious exported receivers
-        NodeList receiverNodes = document.getElementsByTagName("receiver");
-        for (int i = 0; i < receiverNodes.getLength(); i++) {
-            Element receiverElement = (Element) receiverNodes.item(i);
-            String receiverName = receiverElement.getAttribute("android:name");
-            String exported = receiverElement.getAttribute("android:exported");
-
-            // Check if exported receiver components are suspicious
-            if ("true".equals(exported)) {
-                return "Warning: Exported receiver found - " + receiverName;
-            }
-        }
-
-        // Check for suspicious services
-        NodeList serviceNodes = document.getElementsByTagName("service");
-        for (int i = 0; i < serviceNodes.getLength(); i++) {
-            Element serviceElement = (Element) serviceNodes.item(i);
-            String serviceName = serviceElement.getAttribute("android:name");
-            String exported = serviceElement.getAttribute("android:exported");
-
-            // Check if exported service components are suspicious
-            if ("true".equals(exported)) {
-                return "Warning: Exported service found - " + serviceName;
-            }
-        }
-
-        // If no suspicious items found
-        return "Manifest seems clean. No suspicious activities detected.";
-    }
 
     // Obfuscation Detection
     private static void inspectForObfuscation(SootClass sootClass) {
@@ -159,6 +103,17 @@ public class ManifestChecker {
             }
         }
     }
+
+    private static void saveToCSV(String manifestPath, String result) {
+        try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(CSV_FILE), StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+            writer.write(manifestPath + "," + result.replace(",", ";"));
+            writer.newLine();
+            System.out.println("Results saved to " + CSV_FILE);
+        } catch (IOException e) {
+            System.err.println("Error writing to CSV: " + e.getMessage());
+        }
+    }
+
 
     // Steganography Detection (for Class and Field Names)
     private static void inspectForSteganography(SootClass sootClass) {
@@ -206,6 +161,71 @@ public class ManifestChecker {
         detectPrimeFactorCryptos(sootClass); // Check for RSA or prime-based crypto algorithms
         detectCustomCryptoAlgorithms(sootClass); // Check for custom encryption algorithms
         detectEncryptedStrings(sootClass); // Detect base64, xor, rot13 encryption methods
+    }
+
+
+
+    public static String checkManifestForMaliciousActivity(String manifestPath) throws Exception {
+        File manifestFile = new File(manifestPath);
+        if (!manifestFile.exists()) {
+            return "Manifest file not found!";
+        }
+
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        Document document = builder.parse(manifestFile);
+
+        NodeList permissionNodes = document.getElementsByTagName("uses-permission");
+        List<String[]> suspiciousItems = new ArrayList<>();
+
+        for (int i = 0; i < permissionNodes.getLength(); i++) {
+            Element permissionElement = (Element) permissionNodes.item(i);
+            String permissionName = permissionElement.getAttribute("android:name");
+            if (Arrays.asList(SUSPICIOUS_PERMISSIONS).contains(permissionName)) {
+                suspiciousItems.add(new String[]{"Suspicious permission", permissionName});
+            }
+        }
+
+        NodeList activityNodes = document.getElementsByTagName("activity");
+        for (int i = 0; i < activityNodes.getLength(); i++) {
+            Element activityElement = (Element) activityNodes.item(i);
+            if ("true".equals(activityElement.getAttribute("android:exported"))) {
+                suspiciousItems.add(new String[]{"Exported activity", activityElement.getAttribute("android:name")});
+            }
+        }
+
+        // Write to CSV file
+        File csvFile = new File("suspicious_manifest_activity.csv");
+        try (FileWriter writer = new FileWriter(csvFile);
+             CSVWriter csvWriter = new CSVWriter(writer)) {
+            csvWriter.writeNext(new String[]{"Type", "Value"}); // Header row
+            for (String[] item : suspiciousItems) {
+                csvWriter.writeNext(item);
+            }
+            csvWriter.close();
+        }
+
+        return suspiciousItems.isEmpty() ? "Manifest seems clean." : "Suspicious activities logged to CSV.";
+    }
+
+
+
+
+
+    public static void main(String[] args) {
+        if (args.length == 0) {
+            System.out.println("Usage: java ManifestChecker <path-to-AndroidManifest.xml>");
+            return;
+        }
+
+        String manifestPath = args[0];
+        try {
+            String result = checkManifestForMaliciousActivity(manifestPath);
+            System.out.println(result);
+            saveToCSV(manifestPath, result);
+        } catch (Exception e) {
+            System.err.println("Error processing manifest file: " + e.getMessage());
+        }
     }
 
 
