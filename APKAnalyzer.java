@@ -6,6 +6,13 @@ import soot.*;
 import soot.jimple.toolkits.callgraph.CallGraph;
 import soot.jimple.toolkits.callgraph.Edge;
 import soot.options.Options;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import javax.imageio.ImageIO;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.awt.image.BufferedImage;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
@@ -13,11 +20,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
-import org.json.JSONObject;
-import org.json.JSONArray;
-
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
 
 public class APKAnalyzer {
     public static void main(String[] args) {
@@ -47,8 +49,10 @@ public class APKAnalyzer {
                 extractAST(apk.getAbsolutePath(), apk.getName(), apkCounter, outputDir.getAbsolutePath());
                 analyzeLayoutXML(apk.getAbsolutePath(), apk.getName(), apkCounter, outputDir.getAbsolutePath());
                 detectObfuscation(apk.getAbsolutePath(), apk.getName(), apkCounter, outputDir.getAbsolutePath());
+                detectSteganographyAndSaveAsJson(apk.getAbsolutePath(), apk.getName(), apkCounter, outputDir.getAbsolutePath());
             } catch (Exception e) {
                 System.err.println("Error processing " + apk.getName() + ": " + e.getMessage());
+                e.printStackTrace();
             }
             apkCounter++;
         }
@@ -74,7 +78,7 @@ public class APKAnalyzer {
                     File manifestFile = new File(outputDir, apk.getName() + "_AndroidManifest.xml");
                     Files.copy(zis, manifestFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
                     parseManifest(manifestFile, apk.getName(), outputDir);
-                    return;
+                    break;
                 }
             }
         } catch (IOException e) {
@@ -84,22 +88,153 @@ public class APKAnalyzer {
 
     private static void parseManifest(File manifestFile, String apkName, File outputDir) {
         try {
-            List<String> lines = Files.readAllLines(manifestFile.toPath());
+            DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+            DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
+            Document doc = dBuilder.parse(manifestFile);
+            doc.getDocumentElement().normalize();
+
             JSONObject jsonManifest = new JSONObject();
             JSONArray permissions = new JSONArray();
+            NodeList permissionNodes = doc.getElementsByTagName("uses-permission");
 
-            for (String line : lines) {
-                if (line.contains("permission")) {
-                    permissions.put(line.trim());
-                }
+            for (int i = 0; i < permissionNodes.getLength(); i++) {
+                Element permission = (Element) permissionNodes.item(i);
+                String permissionName = permission.getAttribute("android:name");
+                permissions.put(permissionName);
             }
 
             jsonManifest.put("permissions", permissions);
-
             File jsonFile = new File(outputDir, apkName + "_manifest.json");
             Files.write(jsonFile.toPath(), jsonManifest.toString(4).getBytes());
-        } catch (IOException e) {
+        } catch (Exception e) {
             System.err.println("Error parsing manifest: " + e.getMessage());
+        }
+    }
+
+    private static double analyzeEntropy(BufferedImage image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        int[] pixelValues = new int[width * height];
+
+        for (int i = 0; i < width; i++) {
+            for (int j = 0; j < height; j++) {
+                pixelValues[i * height + j] = image.getRGB(i, j);
+            }
+        }
+
+        double[] histogram = new double[256];
+        for (int pixelValue : pixelValues) {
+            int grayValue = (pixelValue >> 16) & 0xFF;
+            histogram[grayValue]++;
+        }
+
+        double totalPixels = pixelValues.length;
+        for (int i = 0; i < 256; i++) {
+            histogram[i] /= totalPixels;
+        }
+
+        double entropy = 0.0;
+        for (double prob : histogram) {
+            if (prob > 0) {
+                entropy -= prob * Math.log(prob) / Math.log(2);
+            }
+        }
+        return entropy;
+    }
+
+    private static void extractApk(String apkPath, String extractDir) throws IOException {
+        File dir = new File(extractDir);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+
+        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(apkPath))) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                File newFile = new File(extractDir, entry.getName());
+                if (entry.isDirectory()) {
+                    newFile.mkdirs();
+                } else {
+                    newFile.getParentFile().mkdirs();
+                    try (FileOutputStream fos = new FileOutputStream(newFile)) {
+                        byte[] buffer = new byte[1024];
+                        int len;
+                        while ((len = zis.read(buffer)) > 0) {
+                            fos.write(buffer, 0, len);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static String analyzeLsb(String imagePath) {
+        try {
+            BufferedImage image = ImageIO.read(new File(imagePath));
+            int width = image.getWidth();
+            int height = image.getHeight();
+
+            int suspiciousCount = 0;
+            for (int x = 0; x < width; x++) {
+                for (int y = 0; y < height; y++) {
+                    int pixel = image.getRGB(x, y);
+                    int lsb = pixel & 1;
+                    if (lsb == 1) suspiciousCount++;
+                }
+            }
+
+            double ratio = (double) suspiciousCount / (width * height);
+            return ratio > 0.5 ? "Possible LSB steganography detected" : "No significant LSB patterns";
+        } catch (IOException e) {
+            return "Error analyzing LSB: " + e.getMessage();
+        }
+    }
+
+    private static void detectSteganographyAndSaveAsJson(String apkPath, String apkName, int apkCounter, String outputDir) {
+        String extractDir = outputDir + "/extracted_" + apkCounter;
+        try {
+            extractApk(apkPath, extractDir);
+            File extractedFolder = new File(extractDir);
+
+            JSONObject resultJson = new JSONObject();
+            JSONArray imagesArray = new JSONArray();
+
+            File[] files = extractedFolder.listFiles();
+            if (files != null) {
+                for (File file : files) {
+                    String fileName = file.getName().toLowerCase();
+                    if (fileName.endsWith(".png") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) {
+                        JSONObject imageResult = new JSONObject();
+                        imageResult.put("image_name", fileName);
+
+                        BufferedImage image = ImageIO.read(file);
+                        if (image != null) {
+                            String lsbResult = analyzeLsb(file.getAbsolutePath());
+                            imageResult.put("LSB_steganography", lsbResult);
+
+                            double entropy = analyzeEntropy(image);
+                            imageResult.put("entropy", entropy);
+                            imageResult.put("DCT_steganography", entropy > 7.0 ?
+                                    "Possible high entropy detected" : "Normal entropy levels");
+
+                            imagesArray.put(imageResult);
+                        }
+                    }
+                }
+            }
+
+            resultJson.put("images", imagesArray);
+            File jsonFile = new File(outputDir, apkName.replace(".apk", "") +
+                    "_steganography_analysis_" + apkCounter + ".json");
+
+            try (FileWriter fileWriter = new FileWriter(jsonFile)) {
+                fileWriter.write(resultJson.toString(4));
+            }
+
+            deleteDirectory(new File(extractDir));
+            System.out.println("Steganography analysis saved to: " + jsonFile.getAbsolutePath());
+        } catch (Exception e) {
+            System.err.println("Error during steganography analysis: " + e.getMessage());
         }
     }
 
@@ -131,6 +266,7 @@ public class APKAnalyzer {
                 }
                 writer.println("}");
             }
+            System.out.println("Class graph saved to: " + outputFile.getAbsolutePath());
         } catch (Exception e) {
             System.err.println("Failed to generate ClassGraph for " + apkName + ": " + e.getMessage());
         }
@@ -161,47 +297,48 @@ public class APKAnalyzer {
                 }
                 writer.println("}");
             }
+            System.out.println("Method call graph saved to: " + outputFile.getAbsolutePath());
         } catch (Exception e) {
             System.err.println("Failed to generate MethodCallGraph for " + apkName + ": " + e.getMessage());
         }
     }
 
-
     private static void analyzeLayoutXML(String apkPath, String apkName, int apkCounter, String outputDir) {
-        String layoutPath = outputDir + "/" + apkName.replace(".apk", "") + "_layout_" + apkCounter + ".json";
-        JSONObject resultJson = new JSONObject();
-        JSONArray layoutsArray = new JSONArray();
+        String extractDir = outputDir + "/extracted_" + apkCounter;
+        try {
+            extractApk(apkPath, extractDir);
+            String layoutPath = outputDir + "/" + apkName.replace(".apk", "") + "_layout_" + apkCounter + ".json";
+            JSONObject resultJson = new JSONObject();
+            JSONArray layoutsArray = new JSONArray();
 
-        File extractedDir = new File(outputDir, apkName.replace(".apk", ""));
-        File layoutDir = new File(extractedDir, "res/layout");
-
-        if (!layoutDir.exists() || !layoutDir.isDirectory()) {
-            System.out.println("No layout XML files found for: " + apkName);
-            return;
-        }
-
-        List<File> layoutFiles = getXMLFiles(layoutDir);
-        for (File file : layoutFiles) {
-            try {
-                JSONObject layoutJson = analyzeXML(file);
-                if (layoutJson != null) {
-                    layoutsArray.put(layoutJson);
-                }
-            } catch (Exception e) {
-                System.err.println("Error processing " + file.getName() + ": " + e.getMessage());
+            File layoutDir = new File(extractDir, "res/layout");
+            if (!layoutDir.exists() || !layoutDir.isDirectory()) {
+                System.out.println("No layout XML files found for: " + apkName);
+                return;
             }
-        }
 
-        resultJson.put("layouts", layoutsArray);
+            List<File> layoutFiles = getXMLFiles(layoutDir);
+            for (File file : layoutFiles) {
+                try {
+                    JSONObject layoutJson = analyzeXML(file);
+                    if (layoutJson != null) {
+                        layoutsArray.put(layoutJson);
+                    }
+                } catch (Exception e) {
+                    System.err.println("Error processing " + file.getName() + ": " + e.getMessage());
+                }
+            }
 
-        // Save JSON output
-        try (PrintWriter writer = new PrintWriter(layoutPath)) {
-            writer.write(resultJson.toString(4));
+            resultJson.put("layouts", layoutsArray);
+            try (PrintWriter writer = new PrintWriter(layoutPath)) {
+                writer.write(resultJson.toString(4));
+            }
+
+            deleteDirectory(new File(extractDir));
+            System.out.println("Layout analysis saved: " + layoutPath);
         } catch (Exception e) {
-            System.err.println("Error saving JSON: " + e.getMessage());
+            System.err.println("Error in layout analysis: " + e.getMessage());
         }
-
-        System.out.println("Layout analysis saved: " + layoutPath);
     }
 
     private static List<File> getXMLFiles(File dir) {
@@ -262,7 +399,6 @@ public class APKAnalyzer {
         }
     }
 
-
     private static void extractAST(String apkPath, String apkName, int apkCounter, String outputDir) {
         try {
             G.reset();
@@ -278,7 +414,6 @@ public class APKAnalyzer {
             Scene.v().loadNecessaryClasses();
             PackManager.v().runPacks();
 
-            // JSON Object to store AST
             JSONObject astJson = new JSONObject();
             JSONArray importsArray = new JSONArray();
             JSONArray classesArray = new JSONArray();
@@ -325,9 +460,8 @@ public class APKAnalyzer {
                 classesArray.put(classJson);
             }
 
-            // Add inferred imports to JSON
             for (String imp : uniqueImports) {
-                if (imp.contains(".")) { // Ignore primitive types
+                if (imp.contains(".")) {
                     importsArray.put(imp);
                 }
             }
@@ -336,10 +470,9 @@ public class APKAnalyzer {
             astJson.put("imports", importsArray);
             astJson.put("classes", classesArray);
 
-            // Write JSON output
             File outputFile = new File(outputDir, apkName.replace(".apk", "") + "_ast_" + apkCounter + ".json");
             try (PrintWriter writer = new PrintWriter(outputFile)) {
-                writer.write(astJson.toString(4)); // Pretty-print JSON
+                writer.write(astJson.toString(4));
             }
 
             System.out.println("AST saved: " + outputFile.getAbsolutePath());
@@ -367,59 +500,65 @@ public class APKAnalyzer {
             List<String> obfuscatedMethods = new ArrayList<>();
             List<String> obfuscatedFields = new ArrayList<>();
 
-            // Check class names for patterns indicating obfuscation
             for (SootClass sc : Scene.v().getClasses()) {
                 if (isObfuscatedName(sc.getName())) {
                     obfuscatedClasses.add(sc.getName());
                 }
-
-                // Check methods within classes
                 for (SootMethod method : sc.getMethods()) {
                     if (isObfuscatedName(method.getName())) {
-                        obfuscatedMethods.add(method.getName());
+                        obfuscatedMethods.add(method.getSignature());
                     }
-
-                    // Check fields within classes
-                    for (SootField field : sc.getFields()) {
-                        if (isObfuscatedName(field.getName())) {
-                            obfuscatedFields.add(field.getName());
-                        }
+                }
+                for (SootField field : sc.getFields()) {
+                    if (isObfuscatedName(field.getName())) {
+                        obfuscatedFields.add(field.getSignature());
                     }
                 }
             }
 
-            // Save or log the findings
             saveObfuscationResults(apkName, obfuscatedClasses, obfuscatedMethods, obfuscatedFields, outputDir);
-
         } catch (Exception e) {
-            System.err.println("Error detecting obfuscation in APK " + apkName + ": " + e.getMessage());
+            System.err.println("Error in obfuscation detection: " + e.getMessage());
         }
     }
 
-    // Helper method to check if a name matches obfuscation patterns
     private static boolean isObfuscatedName(String name) {
-        // Regex pattern for detecting obfuscated names (e.g., random string patterns)
-        String pattern = "^[a-zA-Z0-9]{6,}$"; // Match names with random-looking alphanumeric characters
+        String pattern = "^[a-zA-Z]{1,2}$|^[a-zA-Z0-9]{6,}$";
         Pattern p = Pattern.compile(pattern);
         Matcher m = p.matcher(name);
-        return m.matches();
+        return m.matches() && !name.contains(".");
     }
 
-    // Save obfuscation detection results to a file
-    private static void saveObfuscationResults(String apkName, List<String> classes, List<String> methods, List<String> fields, String outputDir) {
+    private static void saveObfuscationResults(String apkName, List<String> classes, List<String> methods,
+                                               List<String> fields, String outputDir) {
         JSONObject obfuscationJson = new JSONObject();
         obfuscationJson.put("apk", apkName);
         obfuscationJson.put("obfuscated_classes", new JSONArray(classes));
         obfuscationJson.put("obfuscated_methods", new JSONArray(methods));
         obfuscationJson.put("obfuscated_fields", new JSONArray(fields));
 
-        // Save the results to a JSON file
         File outputFile = new File(outputDir, apkName.replace(".apk", "") + "_obfuscation.json");
         try (PrintWriter writer = new PrintWriter(outputFile)) {
             writer.write(obfuscationJson.toString(4));
             System.out.println("Obfuscation results saved for " + apkName);
         } catch (IOException e) {
             System.err.println("Error saving obfuscation results: " + e.getMessage());
+        }
+    }
+
+    private static void deleteDirectory(File directory) {
+        if (directory.exists()) {
+            File[] files = directory.listFiles();
+            if (files != null) {
+                for (File file : files) {
+                    if (file.isDirectory()) {
+                        deleteDirectory(file);
+                    } else {
+                        file.delete();
+                    }
+                }
+            }
+            directory.delete();
         }
     }
 }
